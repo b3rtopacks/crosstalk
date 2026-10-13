@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "CrossTalk",
+  "version": "0.1.0",
+  "description": "Lets the local CrossTalk app read replies in your ChatGPT tab and fill its composer. It presses Send only when you click SEND in CrossTalk or have switched AUTO SEND on. Talks only to 127.0.0.1.",
+  "permissions": ["alarms", "scripting"],
+  "host_permissions": ["https://chatgpt.com/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    { "matches": ["https://chatgpt.com/*"], "js": ["content-chatgpt.js"], "run_at": "document_idle" }
+  ]
+}

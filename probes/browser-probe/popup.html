@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  body { font: 13px system-ui, sans-serif; width: 420px; margin: 10px; }
+  button { margin: 0 6px 6px 0; padding: 4px 10px; }
+  textarea { width: 100%; height: 260px; font: 11px Consolas, monospace; }
+  #status { margin: 6px 0; color: #444; }
+  label { display: block; margin: 4px 0; }
+</style>
+<h3 style="margin:0 0 6px">CrossTalk DOM Probe</h3>
+<div>Open a conversation on claude.ai or chatgpt.com, then:</div>
+<label><input type="checkbox" id="preview"> include first 60 chars of message text (off = lengths only)</label>
+<button id="dump">Dump structure</button><button id="copy">Copy</button><button id="save">Save .json</button>
+<div id="status"></div>
+<textarea id="out" readonly></textarea>
+<script src="dump.js"></script>
+<script src="popup.js"></script>

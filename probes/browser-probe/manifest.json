@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "CrossTalk DOM Probe",
+  "version": "0.0.1",
+  "description": "Manual structure dump (roles, aria-labels, data-* names, composer/message/stop controls) for claude.ai and chatgpt.com. No network, no storage, no background activity.",
+  "permissions": ["activeTab", "scripting"],
+  "action": { "default_title": "CrossTalk DOM Probe", "default_popup": "popup.html" }
+}

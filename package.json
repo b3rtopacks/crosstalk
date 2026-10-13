@@ -1,0 +1,25 @@
+{
+  "name": "crosstalk",
+  "version": "0.1.0",
+  "description": "CrossTalk links Claude and ChatGPT conversations and lets them pass replies between each other locally — no API keys required.",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node test.mjs",
+    "start": "node dist/hub/main.mjs",
+    "package": "node scripts/package.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.300",
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.5.12",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.6.0"
+  }
+}

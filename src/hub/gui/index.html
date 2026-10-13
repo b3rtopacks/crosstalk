@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CrossTalk</title>
+<style>
+  :root { --bg:#f6f6f4; --card:#fff; --ink:#1d1d1b; --muted:#6b6b66; --line:#dcdcd6; --ok:#1a7f4b; --warn:#b26a00; --bad:#b3261e; --accent:#2f5bd8; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161615; --card:#201f1e; --ink:#ecebe6; --muted:#9a9990; --line:#34332f; --ok:#4cc38a; --warn:#e0a03c; --bad:#f2766d; --accent:#7b9bff; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 system-ui, "Segoe UI", sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-size: 18px; margin: 0 0 4px; } .sub { color:var(--muted); margin:0 0 16px; }
+  .grid { display:grid; grid-template-columns: 1fr 1fr; gap:12px; } @media (max-width:760px){ .grid{ grid-template-columns:1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:0 0 10px; }
+  .row { display:flex; justify-content:space-between; gap:10px; padding:3px 0; } .row span:first-child { color:var(--muted); }
+  .row span:last-child { text-align:right; overflow-wrap:anywhere; }
+  [hidden] { display:none !important; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; border:1px solid var(--line); }
+  .ok { color:var(--ok); } .warn { color:var(--warn); } .bad { color:var(--bad); }
+  select, button { font:inherit; padding:6px 10px; border-radius:7px; border:1px solid var(--line); background:var(--card); color:var(--ink); }
+  button { cursor:pointer; } button:disabled { opacity:.45; cursor:default; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:14px 0; }
+  .note { margin-top:8px; padding:8px 10px; border-radius:7px; background:color-mix(in srgb, var(--warn) 12%, transparent); font-size:13px; }
+  pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:200px; overflow:auto; background:var(--bg); border:1px solid var(--line); border-radius:7px; padding:8px; margin:8px 0 0; font:12px/1.4 Consolas, monospace; }
+  #log div { padding:2px 0; font-size:13px; } .t { color:var(--muted); margin-right:8px; }
+  #result { margin-top:8px; font-size:13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>CrossTalk</h1>
+  <p class="sub">Relay between a Claude Desktop conversation and a ChatGPT browser tab. Replies are inserted into the other composer and verified. <strong>You press Send</strong> unless you switch on AUTO SEND.</p>
+
+  <section class="card" id="extBanner" style="margin-bottom:12px"><strong>Browser extension: …</strong></section>
+
+  <div class="grid">
+    <section class="card" id="claudeCard"><h2>Claude Desktop</h2><div id="claudeBody">…</div>
+      <button id="claudePreview">Show latest reply</button><pre id="claudePre" hidden></pre></section>
+    <section class="card" id="gptCard"><h2>ChatGPT (browser tab)</h2>
+      <div class="row"><span>Tab</span><span><select id="tabSel"></select></span></div>
+      <div id="gptBody">…</div>
+      <button id="gptPreview">Show latest reply</button><pre id="gptPre" hidden></pre></section>
+  </div>
+
+  <section class="card" style="margin-top:12px">
+    <h2>Link</h2>
+    <div id="linkBody"></div>
+    <div class="actions"><button id="linkBtn">Link current Claude conversation ⇄ selected ChatGPT tab</button><button id="unlinkBtn">Unlink</button></div>
+    <div class="actions">
+      <button class="primary" id="c2g">Claude → ChatGPT</button>
+      <button class="primary" id="g2c">ChatGPT → Claude</button>
+      <label><input type="checkbox" id="overwrite"> overwrite an existing draft in the destination</label>
+    </div>
+    <div id="result"></div>
+  </section>
+
+  <section class="card" style="margin-top:12px" id="autoCard">
+    <h2>Controlled automatic relay</h2>
+    <p class="sub" style="margin:0 0 8px">Detects each new completed reply and fills the other composer. <strong>You still click SEND.</strong></p>
+    <div class="row"><span>State</span><span><strong id="aState">NOT_STARTED</strong></span></div>
+    <div class="row"><span>Expected next</span><span id="aNext">—</span></div>
+    <div class="row"><span>Hops</span><span id="aHops">0 / 2</span></div>
+    <div class="row"><span>Relayed replies tracked</span><span id="aSeen">0</span></div>
+    <div id="aReason" class="note" hidden></div>
+    <pre id="aPending" hidden></pre>
+    <div class="actions">
+      <button id="aAutoToggle" disabled>AUTO SEND: OFF</button>
+      <label>countdown <input id="aDelay" type="number" min="0" step="0.5" value="2" style="width:56px"> s</label>
+      <span id="aAutoBadge" class="pill bad" hidden>AUTO — will send without you</span>
+      <span id="aCountdown" class="warn"></span>
+      <button id="aCancel" hidden>Cancel auto-send</button>
+    </div>
+    <div class="actions" id="aStartRow">
+      <label>Next speaker <select id="aNextSel"><option value="auto">Auto-detect</option><option value="claude">Claude</option><option value="chatgpt">ChatGPT</option></select></label>
+      <label>Max hops <input id="aMax" type="number" min="1" value="2" style="width:64px"></label>
+      <label><input type="checkbox" id="aAutoAtStart"> AUTO SEND (sends without you)</label>
+      <label><input type="checkbox" id="aExisting"> relay that side's current reply first</label>
+      <button class="primary" id="aStart">Start</button>
+      <div id="aSummary" style="flex-basis:100%;font-weight:600"></div>
+    </div>
+    <div class="actions">
+      <button id="aPause">Pause</button><button id="aResume">Resume</button><button id="aReset">Reset</button>
+      <button class="primary" id="aSendGpt" hidden>SEND TO CHATGPT</button>
+      <button class="primary" id="aSendClaude" hidden>SEND TO CLAUDE</button>
+    </div>
+    <div id="aResult"></div>
+  </section>
+
+  <section class="card" style="margin-top:12px"><h2>Event log</h2><div id="log"></div></section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+const yn = (v, t = 'yes', f = 'no') => v == null ? '<span class="pill">unknown</span>' : v ? `<span class="pill">${t}</span>` : `<span class="pill">${f}</span>`;
+let status = null;
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json', 'x-relay': '1' }, body: JSON.stringify(body) });
+  const j = await r.json();
+  if (!r.ok) throw Object.assign(new Error(j.detail || j.error), { code: j.error });
+  return j;
+}
+
+function stateRows(s, extra = '') {
+  const gen = s.generating ? '<span class="pill warn">generating</span>' : s.idle ? '<span class="pill ok">idle</span>' : '<span class="pill">not idle</span>';
+  return `
+    <div class="row"><span>Connected</span><span>${yn(s.connected)}</span></div>
+    <div class="row"><span>Conversation</span><span>${esc(s.title) || '<i>(none)</i>'}</span></div>
+    <div class="row"><span>State</span><span>${s.ready ? gen : '<span class="pill bad">not ready</span>'}</span></div>
+    <div class="row"><span>Composer empty</span><span>${yn(s.composerBlank)}</span></div>
+    <div class="row"><span>Send button enabled</span><span>${yn(s.sendEnabled)}</span></div>
+    ${extra}${s.warning ? `<div class="note">${esc(s.warning)}</div>` : ''}`;
+}
+
+function render(st) {
+  status = st;
+  $('claudeBody').innerHTML = stateRows(st.claude);
+  $('gptBody').innerHTML = stateRows(st.chatgpt, st.chatgpt.conversationKey ? `<div class="row"><span>Path</span><span>${esc(st.chatgpt.conversationKey)}</span></div>` : '');
+  const sel = $('tabSel'); const cur = String(st.selectedTab ?? '');
+  if (document.activeElement !== sel) {
+    sel.innerHTML = '<option value="">— select a ChatGPT tab —</option>' + st.tabs.map((t) => `<option value="${esc(t.id)}" ${t.id === cur ? 'selected' : ''}>${esc(t.label)}</option>`).join('');
+  }
+  const l = st.link;
+  $('linkBody').innerHTML = l
+    ? `<div class="row"><span>Claude</span><span>${esc(l.claudeTitle)} ${st.linkOk.claudeMatches ? '<span class="pill ok">current</span>' : '<span class="pill bad">different conversation showing</span>'}</span></div>
+       <div class="row"><span>ChatGPT</span><span>${esc(l.chatgptTitle)} <small>${esc(l.chatgptPath)}</small> ${st.linkOk.chatgptMatches ? '<span class="pill ok">current</span>' : '<span class="pill bad">different tab/conversation</span>'}</span></div>`
+    : '<p class="sub">Not linked.</p>';
+  const ready = l && st.linkOk.claudeMatches && st.linkOk.chatgptMatches;
+  if (st.settings && !maxHopsTouched) { $('aMax').value = st.settings.defaultMaxHops; startSummary(); }
+  const a = st.auto, autoOn = !!a && a.state !== 'NOT_STARTED';
+  $('c2g').disabled = autoOn || !(ready && st.claude.idle && !st.chatgpt.generating);
+  $('g2c').disabled = autoOn || !(ready && st.chatgpt.idle && !st.claude.generating);
+  renderAuto(st, ready, a, autoOn);
+  $('unlinkBtn').disabled = !l;
+  $('log').innerHTML = st.log.map((e) => `<div class="${e.level === 'error' ? 'bad' : ''}"><span class="t">${esc(e.t)}</span>${esc(e.msg)}</div>`).join('') || '<div class="sub">No events yet.</div>';
+}
+
+const SIDE = { claude: 'Claude', chatgpt: 'ChatGPT' };
+function renderAuto(st, linkReady, a, autoOn) {
+  const state = a ? a.state : 'NOT_STARTED';
+  $('aState').textContent = state;
+  $('aState').className = /ERROR/.test(state) ? 'bad' : /PAUSED|INTERVENTION/.test(state) ? 'warn' : /READY_TO_SEND/.test(state) ? 'ok' : '';
+  $('aNext').textContent = !a ? '—' : /READY_TO_SEND/.test(state) ? `YOU: press SEND TO ${state.endsWith('CHATGPT') ? 'CHATGPT' : 'CLAUDE'}` : a.expected ? `${SIDE[a.expected]} to speak (waiting for its next completed reply)` : '—';
+  $('aHops').textContent = a ? `${a.hops} / ${a.maxHops}` : `0 / ${(st.settings && st.settings.defaultMaxHops) || 2}`;
+  $('aSeen').textContent = a ? a.seenCount : 0;
+  $('aReason').hidden = !(a && a.reason); $('aReason').textContent = a ? a.reason : '';
+  $('aPending').hidden = !(a && a.pending);
+  if (a && a.pending) $('aPending').textContent = `Draft in ${SIDE[a.pending.to]} (${a.pending.chars} chars, SHA-256 ${a.pending.fingerprint.slice(0, 12)}…):\n\n${a.pending.preview}${a.pending.chars > 400 ? '…' : ''}`;
+  $('aStartRow').hidden = autoOn;
+  $('aStart').disabled = !linkReady;
+  $('aPause').disabled = !autoOn || state === 'PAUSED' || state === 'ERROR';
+  $('aResume').disabled = !(state === 'PAUSED' || state === 'ERROR' || state === 'USER_INTERVENTION_REQUIRED');
+  $('aReset').disabled = !autoOn;
+  const on = !!(a && a.autoSend);
+  $('aAutoToggle').disabled = !autoOn;
+  $('aAutoToggle').textContent = on ? 'AUTO SEND: ON' : 'AUTO SEND: OFF';
+  $('aAutoToggle').className = on ? 'primary' : '';
+  $('aAutoBadge').hidden = !on;
+  const left = a && a.countdownEndsAt ? Math.max(0, (a.countdownEndsAt - Date.now()) / 1000) : null;
+  $('aCountdown').textContent = left === null ? '' : `sending in ${left.toFixed(1)}s…`;
+  $('aCancel').hidden = left === null;
+  $('aSendGpt').hidden = state !== 'READY_TO_SEND_CHATGPT';
+  $('aSendClaude').hidden = state !== 'READY_TO_SEND_CLAUDE';
+}
+async function auto(op, body) {
+  $('aResult').textContent = '';
+  try { await api('/api/auto/' + op, body || {}); } catch (e) { $('aResult').innerHTML = `<span class="bad">${esc(e.code)}: ${esc(e.message)}</span>`; }
+  refresh();
+}
+function startSummary() {
+  const on = $('aAutoAtStart').checked, hops = Number($('aMax').value) || 2;
+  $('aSummary').innerHTML = `<span class="${on ? 'bad' : ''}">AUTO SEND ${on ? 'ON' : 'OFF'}</span> · MAX HOPS: ${hops}${on && hops > 2 ? ' <span class="warn">(more than 2: confirmation required)</span>' : ''}`;
+}
+for (const id of ['aAutoAtStart', 'aMax']) $(id).addEventListener('input', startSummary);
+let maxHopsTouched = false; $('aMax').addEventListener('input', () => { maxHopsTouched = true; });
+startSummary();
+$('aStart').onclick = async () => {
+  const body = { next: $('aNextSel').value, relayExisting: $('aExisting').checked, maxHops: Number($('aMax').value) || 2, autoSend: $('aAutoAtStart').checked, delayMs: Math.round((Number($('aDelay').value) || 0) * 1000) };
+  $('aResult').textContent = '';
+  try { await api('/api/auto/start', body); }
+  catch (e) {
+    if (e.code === 'confirm-required' && confirm(e.message + " (AUTO SEND ON, MAX HOPS " + body.maxHops + ")")) {
+      try { await api('/api/auto/start', { ...body, confirmHighHops: true }); } catch (e2) { $('aResult').innerHTML = `<span class="bad">${esc(e2.code)}: ${esc(e2.message)}</span>`; }
+    } else $('aResult').innerHTML = `<span class="bad">${esc(e.code)}: ${esc(e.message)}</span>`;
+  }
+  refresh();
+};
+$('aPause').onclick = () => auto('pause'); $('aResume').onclick = () => auto('resume'); $('aReset').onclick = () => auto('reset');
+$('aAutoToggle').onclick = async () => {
+  const body = { enabled: !(status && status.auto && status.auto.autoSend), delayMs: Math.round((Number($('aDelay').value) || 0) * 1000) };
+  try { await api('/api/auto/set-auto-send', body); }
+  catch (e) {
+    if (e.code === 'confirm-required' && confirm(e.message)) await api('/api/auto/set-auto-send', { ...body, confirmHighHops: true }).catch((e2) => { $('aResult').innerHTML = `<span class="bad">${esc(e2.message)}</span>`; });
+    else $('aResult').innerHTML = `<span class="bad">${esc(e.message)}</span>`;
+  }
+  refresh();
+};
+$('aCancel').onclick = () => auto('cancel');
+setInterval(async () => { // fast, adapter-free poll so the countdown and the Cancel button feel live
+  if (!status || !status.auto || status.auto.state === 'NOT_STARTED') return;
+  try { const j = await api('/api/auto/snapshot'); if (j.auto) { status.auto = j.auto; renderAuto(status, true, j.auto, j.auto.state !== 'NOT_STARTED'); } } catch {}
+}, 400);
+$('aSendGpt').onclick = () => auto('approve-send'); $('aSendClaude').onclick = () => auto('approve-send');
+
+async function refresh() { try { render(await api('/api/status')); } catch (e) { $('result').innerHTML = `<span class="bad">Hub unreachable: ${esc(e.message)}</span>`; } }
+
+$('tabSel').onchange = async (e) => { await api('/api/select-tab', { tabId: e.target.value || null }); refresh(); };
+$('linkBtn').onclick = async () => { try { await api('/api/link', {}); $('result').textContent = 'Linked.'; } catch (e) { $('result').innerHTML = `<span class="bad">${esc(e.message)}</span>`; } refresh(); };
+$('unlinkBtn').onclick = async () => { await api('/api/unlink', {}); refresh(); };
+async function relay(direction) {
+  $('result').textContent = 'Working…';
+  try {
+    const r = await api('/api/relay', { direction, overwrite: $('overwrite').checked });
+    $('result').innerHTML = `<span class="ok">Inserted ${r.chars} characters and verified by read-back${r.exact ? ' (exact match)' : ' (whitespace-normalised match)'}. Review the destination composer, then press Send yourself.</span>`;
+  } catch (e) { $('result').innerHTML = `<span class="bad">${esc(e.code)}: ${esc(e.message)}</span>`; }
+  refresh();
+}
+$('c2g').onclick = () => relay('claude-to-chatgpt');
+$('g2c').onclick = () => relay('chatgpt-to-claude');
+for (const [btn, pre, side] of [['claudePreview', 'claudePre', 'claude'], ['gptPreview', 'gptPre', 'chatgpt']]) {
+  $(btn).onclick = async () => {
+    const p = $(pre); p.hidden = false; p.textContent = 'Reading…';
+    try { const r = await api('/api/preview?side=' + side); p.textContent = `${r.text.length} chars\n\n` + r.text; } catch (e) { p.textContent = e.code + ': ' + e.message; }
+  };
+}
+function renderExt(h) {
+  const el = $('extBanner');
+  if (!h) { el.innerHTML = '<strong class="bad">Hub unreachable</strong>'; return; }
+  if (h.extensionConnected) { el.innerHTML = '<strong class="ok">Browser extension: CONNECTED</strong>'; return; }
+  el.innerHTML = `<strong class="bad">Browser extension: NOT CONNECTED</strong>
+    <ol style="margin:8px 0 0 18px;padding:0">
+      <li>Open <code>chrome://extensions</code> (or <code>edge://extensions</code>).</li>
+      <li>Turn on <strong>Developer mode</strong>.</li>
+      <li><strong>Load unpacked</strong> and choose <code>${esc(h.extensionPath || 'dist/extension')}</code>.</li>
+      <li>If it is already installed, press its <strong>Reload</strong> button.</li>
+      <li>Keep Chrome / Edge running. Reconnecting can take up to 30 seconds.</li>
+    </ol>`;
+}
+async function pollHealth() { try { renderExt(await api('/api/health')); } catch { renderExt(null); } }
+pollHealth(); setInterval(pollHealth, 2000);
+refresh(); setInterval(refresh, 2500);
+</script>
+</body>
+</html>
