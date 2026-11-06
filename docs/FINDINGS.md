@@ -292,3 +292,46 @@ default 20, so the run did not stop after one cycle):
 Claude reply (1068 chars) → inserted, verified, auto-sent to ChatGPT → ChatGPT reply (360 chars) → inserted, verified,
 auto-sent to Claude → Claude replied → **paused on the hop limit, nothing further sent.** No mismatch occurred, so the
 diagnostic/settle path was exercised only by unit tests, not live. Both composers were empty afterwards.
+
+
+## ChatGPT paired-turn DOM regression (2026-11-06)
+
+**Observed structure:** in the reported ChatGPT Work UI, a leaf `[data-turn-key]`
+container encloses both a user message and its assistant response. Its first
+`[data-conversation-role]` is consequently `user`, even after the response finishes.
+The assistant answer is under `[data-local-conversation-final-assistant="true"]`;
+the user message has `[data-user-message-bubble]`. Reading only the first role
+misclassifies a completed pair and produces `no-completed-response`.
+These structural observations came from developer-tools inspection supplied by the
+reporter; no raw conversation captures are included here.
+
+**Fix:** expand a paired container into user and assistant messages, retaining the
+older one-container-per-message layout. Inspect enclosing completion attributes
+when narrowing to the assistant element. Keep completion and latest-role guards
+outside text extraction. Try the message-ID extractor first, then a conversation-ID
+lookup with fewer DOM assumptions, scoped to the already-validated assistant.
+The fallback cannot substitute an older response or bypass incomplete state.
+
+**Live verification, reported by the tester:** Windows, Claude Desktop, ChatGPT
+in Chrome, CrossTalk v0.1.0 source checkout with the adapter patch. One manual
+round trip completed, with both sides reporting intact labeled plain-text delivery.
+Insertion into an occupied Claude composer was blocked; an explicit retry with
+overwrite enabled succeeded, and the inserted draft remained editable before
+manual submission. AUTO SEND was off. An initial attempt used DuckDuckGo;
+the test succeeded after switching to Chrome, but the initial setup issue was not
+diagnosed further. Exact Windows, Chrome and Claude Desktop versions were not
+recorded. This is not a new auto-send verification.
+
+**Synthetic verification:** `scripts/chatgpt-dom.test.mjs` runs 15 DOM cases via
+`npm test`: paired and separate layouts, pending user tails, Stop/Working guards,
+completion attributes on the assistant and its ancestors, hidden copies, empty
+answers, nested turn wrappers, missing message-ID fallback, older-response rejection,
+and incomplete-state rejection before fallback. jsdom supplies selectors; bounding
+boxes and plain-text `innerText` are simulated. These checks do not verify actual
+browser rendering, streaming transitions, or UI text formatting. The fallback and
+completion edge cases have not yet been verified live.
+
+**Contributions:** Toney Biegalski investigated the live DOM, contributed the
+conversation-ID text lookup and performed the Windows manual test. Sol (OpenAI)
+contributed the paired-turn adaptation, guarded extraction integration and synthetic
+regression tests. Claude participated as the other endpoint in the manual test.
