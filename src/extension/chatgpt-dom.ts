@@ -60,16 +60,27 @@ interface Turn { el: HTMLElement; role: 'user' | 'assistant' | null }
 function turns(): Turn[] {
   const all = [...document.querySelectorAll<HTMLElement>('[data-turn-key]')].filter(rendered);
   const leaf = all.filter((t) => !t.querySelector('[data-turn-key]'));
-  return leaf.map((el) => {
-    const r = el.querySelector('[data-conversation-role]')?.getAttribute('data-conversation-role');
+  return leaf.flatMap((el): Turn[] => {
+    const assistant = el.matches('[data-local-conversation-final-assistant="true"]')
+      ? el : el.querySelector<HTMLElement>('[data-local-conversation-final-assistant="true"]');
+    if (assistant) {
+      const result: Turn[] = [];
+      const user = el.querySelector<HTMLElement>('[data-user-message-bubble]');
+      if (user && rendered(user)) result.push({ el: user, role: 'user' });
+      if (rendered(assistant)) result.push({ el: assistant, role: 'assistant' });
+      return result;
+    }
+    // Older layouts use one turn container per message.
+    const r = el.getAttribute('data-conversation-role') ??
+      el.querySelector('[data-conversation-role]')?.getAttribute('data-conversation-role');
     const role = r === 'assistant' || r === 'user' ? r : el.querySelector('[data-user-message-bubble]') ? 'user' : null;
-    return { el, role };
+    return [{ el, role }];
   });
 }
 
 /** 'complete' | other streaming value | null when the attribute is absent. */
 function turnState(t: Turn): string | null {
-  const holder = t.el.matches('[data-talvt-turn-state]') ? t.el : t.el.querySelector('[data-talvt-turn-state]');
+  const holder = t.el.matches('[data-talvt-turn-state]') ? t.el : t.el.querySelector('[data-talvt-turn-state]') ?? t.el.parentElement?.closest('[data-talvt-turn-state]');
   return holder?.getAttribute('data-talvt-turn-state') ?? null;
 }
 
@@ -121,6 +132,38 @@ export function messageText(source: HTMLElement): string {
   return text;
 }
 
+function getText(assistant: HTMLElement): string {
+  // A turn can hold several messages; the final rendered message is the answer.
+  const msgs = [...assistant.querySelectorAll<HTMLElement>('[data-chatgpt-selection-message-id]')].filter(rendered);
+  const source = assistant.matches('[data-chatgpt-selection-message-id]') ? assistant : msgs[msgs.length - 1];
+  if (!source) throw new PageError('no-message-text', 'ChatGPT message text container not found');
+  const text = messageText(source).replace(/^\s*ChatGPT said:\s*/i, '').trim();
+  if (!text) throw new PageError('empty-response', 'Latest ChatGPT reply text could not be read');
+  return text;
+}
+
+/**
+ * Uses fewer DOM attributes and makes fewer assumptions about message nesting
+ * than the primary extractor, so it may survive changes to the surrounding UI.
+ * Completion and assistant-role checks must pass before this fallback is used.
+ * Conversation-ID lookup contributed by Toney Biegalski.
+ */
+function getTextFallback(assistant: HTMLElement): string {
+  const cid = window.location.href.match(/[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}/)?.[0];
+  if (!cid) throw new PageError('no-replies', 'No conversation ID found in the current URL');
+  const allReplies = [...document.querySelectorAll<HTMLElement>(
+    '[data-chatgpt-selection-conversation-id="' + cid + '"]'
+  )].filter(rendered);
+  const message = allReplies[allReplies.length - 1];
+  // Never substitute an older reply or text outside the validated assistant turn.
+  if (!message || !assistant.contains(message)) {
+    throw new PageError('no-replies', 'No reply text found within the latest assistant response');
+  }
+  const text = messageText(message).trim();
+  if (!text) throw new PageError('empty-response', 'Latest ChatGPT reply text could not be read');
+  return text;
+}
+
 export function readLatest(): LatestResponse {
   const s = getState();
   if (s.generating) throw new PageError('source-generating', 'ChatGPT is still generating');
@@ -128,11 +171,13 @@ export function readLatest(): LatestResponse {
   const last = ts[ts.length - 1];
   if (!last || last.role !== 'assistant') throw new PageError('no-completed-response', 'The newest turn is not an assistant reply');
   if (s.lastAssistantComplete === false) throw new PageError('no-completed-response', `Latest reply is not complete (state: ${turnState(last)})`);
-  // A turn can hold several messages (e.g. reasoning summary + answer); the final message is the answer.
-  const msgs = [...last.el.querySelectorAll<HTMLElement>('[data-chatgpt-selection-message-id]')].filter(rendered);
-  const source = msgs.length ? msgs[msgs.length - 1] : last.el;
-  const text = messageText(source).replace(/^\s*ChatGPT said:\s*/i, '').trim();
-  if (!text) throw new PageError('empty-response', 'Latest ChatGPT reply text could not be read');
+  let text: string;
+  try {
+    text = getText(last.el);
+  } catch (error) {
+    if (!(error instanceof PageError) || !['no-message-text', 'empty-response'].includes(error.code)) throw error;
+    text = getTextFallback(last.el);
+  }
   return { text, title: document.title };
 }
 
